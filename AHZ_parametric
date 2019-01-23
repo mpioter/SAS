@@ -1,0 +1,102 @@
+data mi_data; /*określenie zmiennej los (długość hospitalizacji = liczba dni pomiędzy datą przyjęcia do szpitala a datą jego opuszczenia)*/
+set mi_data;
+los=disdate-admitdate;
+run;
+data mi_data; /*definicja zmiennej czasowej - TIME*/
+set mi_data;
+a=(admitdate-startdata); /*liczba dni od puktu startowego (dla wszystkich pacjentów) do momentu hospitalizacji (przyjęcia do szpitala)*/
+b=(fdate-startdata);     /*liczba dni od puktu startowego (dla wszystkich pacjentów) do momentu zakończenia obserwacji*/
+TIME=b-a;                /*liczba dni od momentu hospitalizacji do momentu zakończenia obserwacji*/
+drop a b;
+run;
+data mi_data; /*definicja zmiennej cenzorującej - CENSOR (1-śmierć; 0-oserwacja prawostronnie ocenzurowana)*/
+set mi_data;
+if dstat=1 or fstat=1 then CENSOR=1; else CENSOR=0;
+run;
+proc means data=mi_data N mean std min p10 q1 median q3 p90 p95 max; /*statystyki dla zmiennych ciagłych*/
+var age hr sysbp diasbp bmi los TIME;
+run;
+proc univariate data=mi_data;
+var age hr sysbp diasbp bmi los TIME;
+histogram age hr sysbp diasbp bmi los TIME;
+run;
+proc corr data=mi_data plots(maxpoints=none)=matrix(histogram); /*Pearson correlation - strength of alinear relationship between two continous numeric variables */
+var age hr sysbp diasbp bmi los TIME;
+run;
+proc freq data=mi_data;
+tables gender cvd afb sho chf av3 miord mitype year dstat fstat CENSOR;
+run;
+proc lifereg data=mi_data; /*estymacja modelu wykładniczego bez zmiennych*/
+model TIME*CENSOR(0)=/dist=exponential;
+run;
+proc lifereg data=mi_data; /*estymacja modelu wykładniczego ze zmienną (0-1 (zmienną dychotomiczną))*/
+model TIME*CENSOR(0)=afb/dist=exponential;
+run;
+data mi_data;              /*utworzenie zmiennej posiadającej cztery kategorie*/ 
+set mi_data;
+if age<50                     then age_gr=1;
+if (age>=50 and age<65)       then age_gr=2;
+if (age>=65 and age<80)       then age_gr=3;
+if age>=80                    then age_gr=4;
+run;
+proc freq data=mi_data;    /*sprawdzenie rozkładu kategorii utworzonej zmiennej zawierającej cztey kategorie*/
+tables age_gr;
+run;
+proc lifereg data=mi_data; /*estymacja modelu wykładniczego ze zmiennymi - zmienną z 4. kategoriami*/
+class age_gr year;
+model TIME*CENSOR(0)=afb gender cvd sho mitype age_gr year/dist=exponential;
+run;
+proc lifereg data=mi_data; /*estymacja modelu Weibulla bez zmiennych*/
+model TIME*CENSOR(0)=/dist=weibull;
+run;
+proc lifetest data=mi_data method=lt plots=(s,h,p); /*estymacja tablic trwania życia metodą tradycyjną - dla uzyskania funkcji hazardu*/
+time TIME*CENSOR(0);
+run;
+data mi_data;              /*estymacja modelu wykładniczego przedziałami stałego - przygotowanie zbioru*/
+set mi_data;
+if TIME<750                   then przedz=1;
+if (TIME>=750 and TIME<1250)  then przedz=2;
+if (TIME>=1250 and time<1750) then przedz=3;
+if TIME>=1750                 then przedz=4;
+do i=1 to przedz;
+output;
+end;
+run;
+data mi_data;
+set mi_data;
+if CENSOR=0 then do;
+CENSOR1=0;
+	if i=przedz then do;
+	   if i=1 then TIME1=TIME;
+	   if i=2 then TIME1=TIME-750;
+	   if i=3 then TIME1=TIME-1250;
+	   if i=4 then TIME1=TIME-1750;
+	end;
+	if i^=przedz then do;
+	   if i=1 then TIME1=750;
+	   if i=2 then TIME1=500;
+	   if i=3 then TIME=500;
+	end;
+end;
+if CENSOR=1 then do;
+	if i=przedz then do;
+	   CENSOR1=1;
+	   if i=1 then TIME1=TIME;
+	   if i=2 then TIME1=TIME-750;
+	   if i=3 then TIME1=TIME-1250;
+	   if i=4 then TIME1=TIME-1750;
+	end;
+	if i^=przedz then do;
+	   CENSOR1=0;
+	   if i=1 then TIME1=750;
+	   if i=2 then TIME1=500;
+	   if i=3 then TIME=500;
+	end;
+end;
+run;
+proc lifereg data=mi_data;
+class i;
+model TIME1*CENSOR1(0)=i/dist=exponential;
+run;
+
+
